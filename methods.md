@@ -150,3 +150,153 @@ for d in $(cat dirs); do cd $d && (while read line; do grep $line *coverage.txt 
 # Make a fasta file of the top 10 most consistent evenly covered single copy exons
 grabContigs_KMedits2.py longest_exons_per_busco_gt300.fa top10consistent top10consistent.fa
 ```
+
+## Copy number estimation and analysis
+
+Job array script for mapping reads to the single copy exon and rDNA & histone sequences
+```sh
+#!/bin/sh
+#$ -m ea # send an email when jobs end or abort
+#$ -M kyle-mcelroy@uiowa.edu # email address
+#$ -cwd # set to current working directory
+#$ -pe 80cpn 80 # use 80 cpus
+#$ -N map_cov_exon # job name
+#$ -t 1-29 # run 29 jobs
+
+# map_cov_rDNA_histone_sc-exons.sh, to run: map_cov_rDNA_histone_sc-exons.sh
+
+# pwd=/Users/kemcelroy/rDNA_histones
+
+# load samtools Version: 1.3.1 (using htslib 1.3.2)
+module load samtools
+
+# collect the input names from the text file "jobs2"
+names=($(cat jobs2))
+echo ${names[${SGE_TASK_ID}]}
+
+# map reads to the set of single copy exons along withe genes of interest: 18S, 5.8S, 28S, H2A, H2B, H3, H4, 5S, H1
+bwa mem -t 80 0_index/rDNA_histone_sc-exons.fa "/nfsscratch/Users/kemcelroy/reads/${names[${SGE_TASK_ID}]}_R1.trim.fastq.gz" "/nfsscratch/Users/kemcelroy/reads/${names[${SGE_TASK_ID}]}_R2.trim.fastq.gz" > "/nfsscratch/Users/kemcelroy/rDNA_histones/2_cn/${names[${SGE_TASK_ID}]}_rDNA_histone_sc-exons.sam"
+# convert to sorted bam file
+samtools view -bS -q 20 -@ 80 "/nfsscratch/Users/kemcelroy/rDNA_histones/2_cn/${names[${SGE_TASK_ID}]}_rDNA_histone_sc-exons.sam" | samtools sort -@ 80 > "2_cn/${names[${SGE_TASK_ID}]}_rDNA_histone_sc-exons.q20.bam"
+# index the sorted bam file
+samtools index "2_cn/${names[${SGE_TASK_ID}]}_rDNA_histone_sc-exons.q20.bam"
+# calculate per-base coverage
+bedtools genomecov -d -ibam "2_cn/${names[${SGE_TASK_ID}]}_rDNA_histone_sc-exons.q20.bam" -g 0_index/rDNA_histone_sc-exons.fa > "2_cn/${names[${SGE_TASK_ID}]}_rDNA_histone_sc-exons.coverage"
+# compress the sam file
+gzip "/nfsscratch/Users/kemcelroy/rDNA_histones/2_cn/${names[${SGE_TASK_ID}]}_rDNA_histone_sc-exons.sam"
+```
+
+Analyze the coverage results to measure copy number
+```sh
+# Calculate copy number from the median coverage of rDNA and histones divided by the median coverage of single copy exons
+while read line; do sh median_calc.sh $line; done < jobs
+rm skip_median_cov.txt
+awk '{print $2}' Yellow2_median_cov.txt | sh transpose.awk | awk 'FNR<2 {print "lineage",$0}' OFS='\t' > median_vals.txt
+awk -v OFS='\t' '{print $1,$3,$4,$5,$6,$7,$8,$9,$10,$11}' median_vals.txt > copy_numbers.txt
+for f in *_cov.txt; do awk '{print $3}' $f | sh transpose.awk | awk -v OFS='\t' '{print var,$0}' var="${f%_median_cov.txt}" >> median_vals.txt; done
+awk -v OFS='\t' 'FNR>1 {print $1, $3/$2, $4/$2, $5/$2, $6/$2, $7/$2, $8/$2, $9/$2, $10/$2, $11/$2}' median_vals.txt >> copy_numbers.txt
+
+# generate the file to use in R to make the boxplots
+# status is a tab separated file, the first column is the lineage name and the second is "Sex" or "Asex"
+# I made a copy number file without Pest
+sed '/Pest/d' copy_numbers.txt > copy_numbers_noPest.txt
+# merge copy number info with reproductive mode
+awk 'NR==FNR{a[NR]=$0;next}{print a[FNR],$0}' status copy_numbers_noPest.txt | awk -v OFS='\t' '{print $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12}' > copy_number_mode.txt
+# format the copy number information into the format I want to make figures in R
+# the "tail -n +10" is to just to get rid of the repeated header information, a result of me not quite being able to skip the first row in the format.sh script
+echo Mode$'\t'Lineage$'\t'Seq$'\t'CN > rDNA_histone_cpn_mode_h1
+sh format.sh copy_number_mode.txt | tail -n +10 >> rDNA_histone_cpn_mode_h1
+# make another without H1
+sed '/H1/d' rDNA_histone_cpn_mode_h1 > rDNA_histone_cpn_mode
+```
+
+
+## Some scripts I used in calculating median coverage and other stats
+```sh
+#!/bin/sh
+# median_calc.sh
+sample=$1
+grep exon "${1}_rDNA_histone_sc-exons.coverage" | sort -n -r -k3 | awk -f median.awk | awk -v OFS='\t' '{print var,"exon",$1}' var="${sample}" >> "${1}_median_cov.txt"
+grep 5.8S "${1}_rDNA_histone_sc-exons.coverage" | sort -n -r -k3 | awk -f median.awk | awk -v OFS='\t' '{print var,"5.8S",$1}' var="${sample}" >> "${1}_median_cov.txt"
+grep 28S "${1}_rDNA_histone_sc-exons.coverage" | sort -n -r -k3 | awk -f median.awk | awk -v OFS='\t' '{print var,"28S",$1}' var="${sample}" >> "${1}_median_cov.txt"
+grep 18S "${1}_rDNA_histone_sc-exons.coverage" | sort -n -r -k3 | awk -f median.awk | awk -v OFS='\t' '{print var,"18S",$1}' var="${sample}" >> "${1}_median_cov.txt"
+grep 5S "${1}_rDNA_histone_sc-exons.coverage" | sort -n -r -k3 | awk -f median.awk | awk -v OFS='\t' '{print var,"5S",$1}' var="${sample}" >> "${1}_median_cov.txt"
+grep H2A "${1}_rDNA_histone_sc-exons.coverage" | sort -n -r -k3 | awk -f median.awk | awk -v OFS='\t' '{print var,"H2A",$1}' var="${sample}" >> "${1}_median_cov.txt"
+grep H2B "${1}_rDNA_histone_sc-exons.coverage" | sort -n -r -k3 | awk -f median.awk | awk -v OFS='\t' '{print var,"H2B",$1}' var="${sample}" >> "${1}_median_cov.txt"
+grep H3 "${1}_rDNA_histone_sc-exons.coverage" | sort -n -r -k3 | awk -f median.awk | awk -v OFS='\t' '{print var,"H3",$1}' var="${sample}" >> "${1}_median_cov.txt"
+grep H4 "${1}_rDNA_histone_sc-exons.coverage" | sort -n -r -k3 | awk -f median.awk | awk -v OFS='\t' '{print var,"H4",$1}' var="${sample}" >> "${1}_median_cov.txt"
+grep H1 "${1}_rDNA_histone_sc-exons.coverage" | sort -n -r -k3 | awk -f median.awk | awk -v OFS='\t' '{print var,"H1",$1}' var="${sample}" >> "${1}_median_cov.txt"
+```
+
+```sh
+#!/bin/sh
+# stats2.sh
+SEQ=$1
+cwd=$(pwd)
+LINEAGE="${cwd##*/}"
+awk -F'\t' '
+{col=$3}{if((col ~  /^-?[0-9]*([.][0-9]+)?$/) && ($0!=""))
+{
+     sum+=col;
+     a[x++]=col;
+     b[col]++
+     if(b[col]>hf){hf=b[col]}
+}
+}
+END{n = asort(a);idx=int((x+1)/2)
+     for (i in b){if(b[i]==hf){(k=="") ? (k=i):(k=k FS i)}{FS=","}}
+     print ln,sq,sum/x,((idx==(x+1)/2) ? a[idx] : (a[idx]+a[idx+1])/2),k
+}' sq=$SEQ ln=$LINEAGE  OFS='\t' $1
+```
+
+```sh
+#!/bin/sh
+# format.sh
+awk -v OFS='\t' '
+	{
+		print $1,$2,"18S",$5
+		print $1,$2,"5.8S",$3
+		print $1,$2,"28S",$4
+		print $1,$2,"H2A",$7
+		print $1,$2,"H2B",$8
+		print $1,$2,"H3",$9
+		print $1,$2,"H4",$10
+		print $1,$2,"5S",$6
+		print $1,$2,"H1",$11
+	}' $1
+  ```
+```sh
+#transpose.awk, run as: sh transpose.awk FILE
+awk '
+{
+    for (i=1; i<=NF; i++)  {
+        a[NR,i] = $i
+    }
+}
+NF>p { p = NF }
+END {
+    for(j=1; j<=p; j++) {
+        str=a[1,j]
+        for(i=2; i<=NR; i++){
+            str=str" "a[i,j];
+        }
+        print str
+    }
+}' $1
+```
+
+```sh
+#/usr/bin/env awk
+#median.awk script, run as: sh median.awk FILE
+{
+    count[NR] = $3;
+}
+END {
+    if (NR % 2) {
+        print count[(NR + 1) / 2];
+    } else {
+        print (count[(NR / 2)] + count[(NR / 2) + 1]) / 2.0;
+    }
+}
+}
+```
