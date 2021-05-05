@@ -1,6 +1,6 @@
-#Methods for the analyzing rDNA and histone copy number from *Potamopyrgus* Illumina paired-end threads
+# Methods for the analyzing rDNA and histone copy number from *Potamopyrgus* Illumina paired-end threads
 
-##Quality control of Illumina reads
+## Quality control of Illumina reads
 
 make file with list of fastq basenames
 ```sh
