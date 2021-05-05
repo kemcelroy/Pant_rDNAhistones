@@ -7,7 +7,7 @@ make file with list of fastq basenames
 ls *_R1.fastq.gz | sed 's/_R1.fastq.gz//g' > jobs
 ```
 Trim reads with Sickle using array job submission:
-```bash
+```sh
 #!/bin/sh
 #$ -m ea # send an email when jobs end or abort
 #$ -M kyle-mcelroy@uiowa.edu # email address
@@ -33,7 +33,7 @@ echo ${names[${SGE_TASK_ID}]}
 	-s "${names[${SGE_TASK_ID}]}_S.trim.fastq.gz"
 ```
 Check the read quality with FastQC using array job submission:
-```bash
+```sh
 #!/bin/sh
 #$ -m ea # send an email when jobs end or abort
 #$ -M kyle-mcelroy@uiowa.edu # email address
