@@ -73,27 +73,20 @@ export AUGUSTUS_CONFIG_PATH="/Users/kemcelroy/downloads/augustus.2.5.5/config"
 /Users/kemcelroy/downloads/busco/scripts/run_BUSCO.py -i Pant_hapt.fasta -o BUSCO_Pant_hap -l /Users/kemcelroy/downloads/busco/metazoa_odb9/ -m genome
 ```
 
-First, make a gff with all of the AUGUSTUS predicted exons, numbered for each gene
-```bash
+Identify candidate sequences for single copy use
+```sh
+# First, make a gff with all of the AUGUSTUS predicted exons, numbered for each gene
 for f in *.gff; do awk -v OFS='\t' '{if ($3=="exon") {print $1,$4,$5,var"_exon-",0,$7}}' var="${f%.gff}" $f >> busco_single_copy_exons.gff; done
-```
-add numbers to each exon
-```sh
+# add numbers to each exon
 awk '{ print $0 "\t" ++count[$4] }' busco_single_copy_exons.gff | awk -v OFS='\t' '{print $1,$2,$3,$4$7,$5,$6}' > busco_single_copy_exons-num.gff
-```
-make a fasta of the exons
-```sh
-bedtools getfasta -name -s -fi Pant_hap.fasta -bed busco_single_copy_exons-num.gff > busco_single_copy_exons-num.fa
+# make a fasta of the exons
+bedtools getfasta -name -s -fi /Users/kemcelroy/genome/hap.Dovetail_02012019.racon6.arcs-pilon2.3.gapfiller2.sspace_CCS2_corrected4.racon13.arcs-pilon4.gapfiller2.sspace_CCS1_corrected.6.racon8.pilon7.fasta -bed busco_single_copy_exons-num.gff > busco_single_copy_exons-num.fa
 sed -i 's/:.*//' busco_single_copy_exons-num.fa
-```
-select the longest exon for each BUSCO gene and filter based on length (300 bp)
-```bash
+# select the longest exon for each BUSCO gene and filter based on length (300 bp)
 samtools faidx busco_single_copy_exons-num.fa
 awk -F '[_\t]' '{print $1,$2,$3}' busco_single_copy_exons-num.fa.fai | awk '$3>max[$1]{max[$1]=$3; row[$1]=$0} END{for (i in row) print row[i]}' | awk '{print $1"_"$2,$3}' OFS='\t' > longest_exons_per_busco
 awk '{if ($2>300) {print $1}}' longest_exons_per_busco > longest_exons_per_busco_gt300
-```
-use Joel's script to make a fasta of the selected > 300 bp long exons ... tried a grep loop but it kept not working
-```sh
+# use Joel's script to make a fasta of the selected > 300 bp long exons ... tried a grep loop but it kept not working
 grabContigs_KMedits2.py busco_single_copy_exons-num.fa longest_exons_per_busco_gt300 longest_exons_per_busco_gt300.fa
 bwa index longest_exons_per_busco_gt300.fa
 ```
